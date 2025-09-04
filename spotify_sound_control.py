@@ -157,7 +157,6 @@ def draw_ui(stdscr, cava_data, volume, track, buttons, scroll_index, max_track_l
     panel_height = 7
     cava_height = h - panel_height - 1
 
-    # CAVA с контуром
     if cava_data:
         for i, val in enumerate(cava_data):
             col = int(i * (w / len(cava_data)))
@@ -171,7 +170,6 @@ def draw_ui(stdscr, cava_data, volume, track, buttons, scroll_index, max_track_l
 
     stdscr.hline(cava_height, 0, "-", w)
 
-    # Линия трека
     track_line = cava_height + 1
     left_btn, track_btn, right_btn = buttons[:3]
 
@@ -198,7 +196,6 @@ def draw_ui(stdscr, cava_data, volume, track, buttons, scroll_index, max_track_l
     stdscr.addstr(track_line, rx, f" {right_btn.text} ", color)
     right_btn.set_position(rx, track_line, width=len(right_btn.text) + 2)
 
-    # Линия громкости
     vol_line = track_line + 3
     minus_btn, plus_btn = buttons[3], buttons[4]
     vol_str = f"{volume}%"
