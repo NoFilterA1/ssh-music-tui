@@ -7,12 +7,6 @@ import os
 import shutil
 from pathlib import Path
 
-try:
-    import pulsectl
-    HAVE_PULSE = True
-except ImportError:
-    HAVE_PULSE = False
-
 PLAYER = "spotify"
 HAVE_PLAYERCTL = shutil.which("playerctl") is not None
 
@@ -22,27 +16,39 @@ def is_termux():
 def run_async(func, *args, **kwargs):
     threading.Thread(target=lambda: func(*args, **kwargs), daemon=True).start()
 
+# --- НОВАЯ ЛОГИКА ГРОМКОСТИ ЧЕРЕЗ PLAYERCTL ---
+
 def get_volume():
-    if HAVE_PULSE:
+    """Получает громкость через playerctl (0.0 - 1.0)."""
+    if HAVE_PLAYERCTL:
         try:
-            with pulsectl.Pulse('volume-check') as pulse:
-                sinks = pulse.sink_list()
-                if sinks:
-                    return int(sinks[0].volume.value_flat * 100)
+            # playerctl возвращает число типа 0.55 для 55%
+            vol_str = subprocess.check_output(
+                ['playerctl', '-p', PLAYER, 'volume'],
+                text=True, timeout=1
+            ).strip()
+            # Если плеер ничего не вернул или вернул пустоту
+            if not vol_str:
+                return 0
+            return int(float(vol_str) * 100)
         except Exception:
             pass
-    return 50
+    return 0
 
 def set_volume(percent):
-    if HAVE_PULSE:
+    """Устанавливает громкость через playerctl."""
+    if HAVE_PLAYERCTL:
         try:
-            with pulsectl.Pulse('volume-set') as pulse:
-                sinks = pulse.sink_list()
-                if sinks:
-                    volume = percent / 100.0
-                    pulse.volume_set_all_chans(sinks[0], volume)
+            # playerctl принимает значение от 0.0 до 1.0
+            vol_float = max(0, min(100, percent)) / 100.0
+            subprocess.call(
+                ['playerctl', '-p', PLAYER, 'volume', str(vol_float)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
         except Exception:
             pass
+
+# -----------------------------------------------
 
 def playerctl_cmd(cmd):
     if HAVE_PLAYERCTL:
@@ -60,7 +66,7 @@ def get_current_track():
                 text=True, timeout=2
             ).strip()
         except Exception:
-            return "No track info"
+            return "Spotify not active"
     return "Demo Artist - Demo Track"
 
 class CavaReader(threading.Thread):
@@ -162,9 +168,9 @@ def draw_ui(stdscr, cava_data, volume, track, buttons, scroll_index, max_track_l
             col = int(i * (w / len(cava_data)))
             bar_height = int(val / 5)
             for y in range(cava_height):
-                stdscr.addstr(y, col, "│", curses.color_pair(7))  # контур
+                stdscr.addstr(y, col, "│", curses.color_pair(7))
                 if y >= cava_height - bar_height:
-                    stdscr.addstr(y, col, "█", curses.color_pair(6))  # красная заливка
+                    stdscr.addstr(y, col, "█", curses.color_pair(6))
     else:
         stdscr.addstr(0, 0, "[No CAVA]")
 
@@ -224,12 +230,12 @@ def main(stdscr):
 
     curses.init_pair(4, curses.COLOR_BLACK, curses.COLOR_CYAN)
     curses.init_pair(5, curses.COLOR_WHITE, -1)
-    curses.init_pair(6, curses.COLOR_RED, -1)   # заливка
-    curses.init_pair(7, curses.COLOR_WHITE, -1) # контур
+    curses.init_pair(6, curses.COLOR_RED, -1)
+    curses.init_pair(7, curses.COLOR_WHITE, -1)
 
     stdscr.nodelay(True)
     stdscr.timeout(50)
-    curses.mousemask(curses.ALL_MOUSE_EVENTS | curses.REPORT_MOUSE_POSITION)
+    curses.mousemask(-1)
 
     bars_count = 50
     cava = CavaReader(bars_count)
@@ -250,19 +256,20 @@ def main(stdscr):
         Button("<", lambda: run_async(playerctl_cmd, "previous")),
         Button("TRACK", lambda: run_async(playerctl_cmd, "play-pause")),
         Button(">", lambda: run_async(playerctl_cmd, "next")),
-        Button("-", lambda: run_async(set_volume, max(get_volume() - 5, 0))),
-        Button("+", lambda: run_async(set_volume, min(get_volume() + 5, 100))),
+        # Обновляем громкость в интерфейсе сразу после нажатия
+        Button("  -  ", lambda: run_async(lambda: (set_volume(volume - 5)))),
+        Button("  +  ", lambda: run_async(lambda: (set_volume(volume + 5)))),
     ]
 
     try:
         while True:
             now = time.time()
-            if now - last_update > 1:
+            # Обновляем состояние чаще (раз в 0.5 сек), чтобы громкость не лагала
+            if now - last_update > 0.5:
                 volume = get_volume()
                 track = get_current_track()
                 last_update = now
 
-            # Прокрутка
             if len(track) > max_track_len:
                 if not scrolling:
                     if time.time() - scroll_timer > scroll_pause:
@@ -287,14 +294,18 @@ def main(stdscr):
             if key == curses.KEY_MOUSE:
                 try:
                     _, mx, my, _, bstate = curses.getmouse()
-                    if bstate & curses.BUTTON1_CLICKED:
+                    if bstate & (curses.BUTTON1_CLICKED | curses.BUTTON1_PRESSED | curses.BUTTON1_DOUBLE_CLICKED):
                         for b in buttons:
                             if b.contains(mx, my):
                                 b.callback()
+                                # Костыль для мгновенного отклика UI на громкость
+                                if "+" in b.text: volume = min(100, volume + 5)
+                                if "-" in b.text: volume = max(0, volume - 5)
+                                time.sleep(0.1)
                                 break
-                    elif bstate & curses.BUTTON1_PRESSED:
-                        for b in buttons:
-                            b.hover = b.contains(mx, my)
+                    
+                    for b in buttons:
+                        b.hover = b.contains(mx, my)
                 except Exception:
                     pass
             elif key == curses.KEY_LEFT:
