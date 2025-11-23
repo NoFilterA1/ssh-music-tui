@@ -32,8 +32,8 @@ It combines **Spotify control**, **system volume adjustment**, and a **live CAVA
 
 ### 📂 Clone the repo
 ```bash
-git clone https://github.com/69lihtajc96/ssh-cava-spotify-control.git
-cd ssh-cava-spotify-control
+git clone https://github.com/69lihtajc96/ssh-music-tui.git
+cd ssh-music-tui
 ````
 
 ### 📋 Install dependencies
